@@ -1,11 +1,13 @@
-import { Component, computed, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Session } from '@supabase/supabase-js';
+import { SupabaseService } from './supabase.service';
 
 type RecordKind = 'Задача' | 'Блокер' | 'Замечание' | 'Встреча';
 type Priority = 'Высокий' | 'Средний' | 'Низкий';
 
 interface BoardTask {
-  id: number;
+  id: string;
   title: string;
   kind: RecordKind;
   priority: Priority;
@@ -15,10 +17,12 @@ interface BoardTask {
   frame: string;
   longitudinal: string;
   photoUrl?: string;
+  photoPath?: string;
+  dueDate?: string;
 }
 
 interface TeamMember {
-  id: number;
+  id: string;
   name: string;
   role: string;
   deck: string;
@@ -33,29 +37,31 @@ interface TeamMember {
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App {
+export class App implements OnInit {
+  private readonly supabase = inject(SupabaseService);
+  readonly authReady = signal(false);
+  readonly session = signal<Session | null>(null);
+  readonly authBusy = signal(false);
+  readonly authError = signal('');
+  authEmail = 'V-A-N-D';
+  authPassword = '';
   readonly todayLabel = new Intl.DateTimeFormat('ru-RU', {
     weekday: 'long', day: 'numeric', month: 'long',
   }).format(new Date()).replace(/^./, (letter) => letter.toUpperCase());
 
-  readonly tasks = signal<BoardTask[]>([
-    { id: 1, title: 'Согласовать обход кабельного лотка', kind: 'Задача', priority: 'Высокий', zone: 'Пожарная зона 5', due: 'сегодня, 10:00', owner: 'ИП', frame: '', longitudinal: '' },
-    { id: 2, title: 'Закрыть замечания по подвесам', kind: 'Задача', priority: 'Средний', zone: 'Палуба 5', due: 'до 21 октября', owner: 'МС', frame: '', longitudinal: '' },
-    { id: 3, title: 'Подготовить участок к изоляции', kind: 'Задача', priority: 'Высокий', zone: 'Пожарная зона 5', due: 'сегодня, 14:00', owner: 'АК', frame: '', longitudinal: '' },
-    { id: 4, title: 'Обновить замеры воздуховода', kind: 'Задача', priority: 'Низкий', zone: 'Кормовая зона', due: 'до 23 октября', owner: 'ЛВ', frame: '', longitudinal: '' },
-  ]);
+  readonly tasks = signal<BoardTask[]>([]);
   readonly newBlockers = signal<BoardTask[]>([]);
   readonly taskCount = computed(() => this.tasks().length);
-  readonly blockerCount = signal(3);
-  readonly crewCount = signal(12);
+  readonly blockerCount = computed(() => this.tasks().filter((task) => task.kind === 'Блокер').length);
+  readonly crewCount = signal(0);
   readonly overallProgress = signal(68);
   readonly modalOpen = signal(false);
   readonly activeView = signal('Обзор');
   readonly photoLightbox = signal<string | null>(null);
-  readonly team = signal<TeamMember[]>(this.loadTeam());
+  readonly team = signal<TeamMember[]>([]);
   readonly assignedCount = computed(() => this.team().filter((member) => this.isAssigned(member)).length);
   readonly showMemberForm = signal(false);
-  readonly editingMemberId = signal<number | null>(null);
+  readonly editingMemberId = signal<string | null>(null);
 
   selectedShip = 'Судно 724';
   selectedDeck = 'Палуба 5';
@@ -81,39 +87,100 @@ export class App {
     longitudinalNumber: string;
   } = this.emptyForm();
 
-  readonly dueTodayCount = computed(() => this.tasks().filter((task) => task.due.startsWith('сегодня')).length);
+  readonly dueTodayCount = computed(() => this.tasks().filter((task) => task.dueDate === new Date().toISOString().slice(0, 10)).length);
+
+  async ngOnInit(): Promise<void> {
+    if (!this.supabase.client) {
+      this.authError.set('Не настроено подключение к Supabase. Проверьте URL и Publishable key.');
+      this.authReady.set(true);
+      return;
+    }
+    const { data, error } = await this.supabase.client.auth.getSession();
+    if (error) this.authError.set(error.message);
+    this.session.set(data.session);
+    this.authReady.set(true);
+    if (data.session) await this.loadCloudData();
+    this.supabase.client.auth.onAuthStateChange((_event, nextSession) => {
+      this.session.set(nextSession);
+      if (nextSession) void this.loadCloudData();
+      else {
+        this.tasks.set([]);
+        this.team.set([]);
+      }
+    });
+  }
+
+  async signIn(): Promise<void> {
+    this.authBusy.set(true);
+    this.authError.set('');
+    try {
+      const { error } = await this.supabase.signIn(this.authEmail.trim(), this.authPassword);
+      if (error) throw error;
+      this.authPassword = '';
+    } catch (error) {
+      this.authError.set(error instanceof Error ? error.message : 'Не удалось войти');
+    } finally {
+      this.authBusy.set(false);
+    }
+  }
+
+  async signOut(): Promise<void> {
+    await this.supabase.signOut();
+  }
+
+  private async loadCloudData(): Promise<void> {
+    try {
+      const [rows, members] = await Promise.all([this.supabase.listWorkItems(this.selectedShip), this.supabase.listTeamMembers(this.selectedShip)]);
+      const tasks = await Promise.all(rows.map(async (row) => {
+        const longitudinal = row.longitudinal_side === 'Центр'
+          ? 'L0'
+          : row.longitudinal_number !== null && row.longitudinal_number !== undefined
+            ? `${row.longitudinal_side} L${row.longitudinal_number}` : '';
+        const due = row.due_at
+          ? new Date(`${row.due_at}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+          : 'без срока';
+        const photoUrl = row.photo_path ? await this.supabase.getWorkPhotoUrl(row.photo_path) : undefined;
+        return {
+          id: row.id,
+          title: row.title,
+          kind: row.record_type,
+          priority: row.priority,
+          zone: [row.deck, row.zone, row.frame_number ? `Фрейм ${row.frame_number}` : '', longitudinal].filter(Boolean).join(' · '),
+          due: due === 'без срока' ? due : `до ${due}`,
+          owner: row.assigned_to ? this.initials(row.assigned_to) : 'АК',
+          frame: row.frame_number ?? '',
+          longitudinal,
+          photoPath: row.photo_path ?? undefined,
+          photoUrl,
+          dueDate: row.due_at ?? undefined,
+        } as BoardTask;
+      }));
+      this.tasks.set(tasks);
+      this.team.set(members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        deck: member.deck,
+        zone: member.zone,
+        task: member.current_task,
+        until: member.available_at?.slice(0, 5) ?? '',
+      })));
+      this.crewCount.set(members.length);
+    } catch (error) {
+      this.notify(`Ошибка загрузки из Supabase: ${error instanceof Error ? error.message : 'неизвестная ошибка'}`);
+    }
+  }
 
   private emptyForm() {
     return {
       title: '', kind: 'Задача' as RecordKind, priority: 'Средний' as Priority,
-      zone: 'Палуба 5 · Пожарная зона 5', due: '', owner: '', frame: '',
+      zone: this.selectedZone, due: '', owner: '', frame: '',
       side: '' as '' | 'Центр' | 'Лево' | 'Право', longitudinalNumber: '',
     };
   }
 
   private emptyMemberForm(): Omit<TeamMember, 'id'> {
     return { name: '', role: 'Монтажник вентиляции', deck: '', zone: '', task: '', until: '' };
-  }
-
-  private loadTeam(): TeamMember[] {
-    const examples: TeamMember[] = [
-      { id: 1, name: 'Иван Петров', role: 'Монтажник вентиляции', deck: 'Палуба 5', zone: 'Пожарная зона 5', task: 'Монтаж магистрали', until: '12:00' },
-      { id: 2, name: 'Марк Соколов', role: 'Монтажник вентиляции', deck: 'Палуба 5', zone: 'Пожарная зона 5', task: 'Исправить подвесы', until: '15:00' },
-      { id: 3, name: 'Леонид Волков', role: 'Замерщик', deck: 'Палуба 5', zone: 'Кормовая зона', task: 'Замеры воздуховода', until: '11:30' },
-      { id: 4, name: 'Сергей Иванов', role: 'Монтажник вентиляции', deck: 'Палуба 4', zone: 'Пожарная зона 4', task: 'Монтаж ответвления', until: '16:00' },
-      { id: 5, name: 'Артём Ковалёв', role: 'Изолировщик', deck: 'Палуба 5', zone: 'Пожарная зона 5', task: 'Подготовить участок к изоляции', until: '14:00' },
-      { id: 6, name: 'Денис Орлов', role: 'Монтажник вентиляции', deck: 'Палуба 3', zone: 'Носовая зона', task: 'Монтаж воздуховода', until: '15:30' },
-      { id: 7, name: 'Павел Смирнов', role: 'Монтажник вентиляции', deck: 'Палуба 5', zone: 'Пожарная зона 5', task: 'Монтаж магистрали', until: '12:00' },
-      { id: 8, name: 'Никита Беляев', role: 'Монтажник вентиляции', deck: 'Палуба 4', zone: 'Пожарная зона 4', task: 'Монтаж подвесов', until: '16:00' },
-      { id: 9, name: 'Олег Захаров', role: 'Изолировщик', deck: 'Палуба 5', zone: 'Кормовая зона', task: 'Изоляция участка', until: '13:30' },
-      { id: 10, name: 'Виктор Макаров', role: 'Монтажник вентиляции', deck: '', zone: '', task: '', until: '' },
-      { id: 11, name: 'Андрей Фёдоров', role: 'Монтажник вентиляции', deck: '', zone: '', task: '', until: '' },
-      { id: 12, name: 'Михаил Павлов', role: 'Монтажник вентиляции', deck: '', zone: '', task: '', until: '' },
-    ];
-    try {
-      const saved = localStorage.getItem('paluba-team');
-      return saved ? JSON.parse(saved) as TeamMember[] : examples;
-    } catch { return examples; }
   }
 
   get visibleTeam(): TeamMember[] {
@@ -145,32 +212,34 @@ export class App {
     this.showMemberForm.set(true);
   }
 
-  saveMember(): void {
+  async saveMember(): Promise<void> {
     if (!this.memberForm.name.trim()) return;
     const editId = this.editingMemberId();
+    try {
+    const saved = await this.supabase.upsertTeamMember({
+      name: this.memberForm.name.trim(), role: this.memberForm.role,
+      vessel: this.selectedShip, deck: this.memberForm.deck, zone: this.memberForm.zone,
+      current_task: this.memberForm.task, available_at: this.memberForm.until || null,
+    }, editId ?? undefined);
+    const member: TeamMember = { ...this.memberForm, id: saved.id, name: saved.name };
     if (editId) {
-      this.team.update((members) => members.map((member) => member.id === editId
-        ? { ...this.memberForm, id: editId, name: this.memberForm.name.trim() }
-        : member));
+      this.team.update((members) => members.map((current) => current.id === editId ? member : current));
       this.notify('Данные сотрудника обновлены');
     } else {
-      const member: TeamMember = { ...this.memberForm, id: Date.now(), name: this.memberForm.name.trim() };
       this.team.update((members) => [...members, member]);
       this.notify('Сотрудник добавлен в команду');
     }
-    this.persistTeam();
     this.showMemberForm.set(false);
+    } catch (error) {
+      this.notify(`Не удалось сохранить сотрудника: ${error instanceof Error ? error.message : 'ошибка'}`);
+    }
   }
 
-  deleteMember(id: number): void {
+  async deleteMember(id: string): Promise<void> {
+    try { await this.supabase.deleteTeamMember(id); }
+    catch (error) { this.notify(`Не удалось удалить: ${error instanceof Error ? error.message : 'ошибка'}`); return; }
     this.team.update((members) => members.filter((member) => member.id !== id));
-    this.persistTeam();
     this.notify('Сотрудник удалён из команды');
-  }
-
-  private persistTeam(): void {
-    try { localStorage.setItem('paluba-team', JSON.stringify(this.team())); }
-    catch { this.notify('Не удалось сохранить изменения на этом устройстве'); }
   }
 
   openModal(): void {
@@ -209,7 +278,7 @@ export class App {
     this.photoPreview = url;
   }
 
-  addTask(): void {
+  async addTask(): Promise<void> {
     if (!this.form.title.trim()) return;
     if (this.form.kind === 'Блокер' && !this.selectedFile) {
       this.notify('Для блокера обязательно прикрепить фото');
@@ -233,28 +302,43 @@ export class App {
     const ownerInitials = this.form.owner.trim()
       ? this.form.owner.trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
       : 'АК';
-    const task: BoardTask = {
-      id: Date.now(),
+    try {
+    const user = this.session()?.user;
+    if (!user) throw new Error('Сначала войдите в приложение');
+    const photoPath = this.selectedFile ? await this.supabase.uploadWorkPhoto(this.selectedFile, user.id) : null;
+    const row = await this.supabase.insertWorkItem({
+      vessel: this.selectedShip,
       title: this.form.title.trim(),
-      kind: this.form.kind,
+      record_type: this.form.kind,
       priority: this.form.priority,
-      zone: [this.form.zone || 'Общий участок', this.form.frame ? `Фрейм ${this.form.frame}` : '', longitudinal]
-        .filter(Boolean).join(' · '),
-      due: due === 'без срока' ? due : `до ${due}`,
-      owner: ownerInitials,
-      frame: this.form.frame,
-      longitudinal,
-      photoUrl: this.selectedFile ? URL.createObjectURL(this.selectedFile) : undefined,
+      deck: this.selectedDeck,
+      zone: this.form.zone || this.selectedZone || 'Общий участок',
+      frame_number: this.form.frame,
+      longitudinal_side: this.form.side,
+      longitudinal_number: this.form.longitudinalNumber ? Number(this.form.longitudinalNumber) : null,
+      due_at: this.form.due || null,
+      assigned_to: this.form.owner.trim(),
+      photo_path: photoPath,
+    });
+    const task: BoardTask = {
+      id: row.id, title: row.title, kind: row.record_type, priority: row.priority,
+      zone: [row.deck, row.zone, row.frame_number ? `Фрейм ${row.frame_number}` : '', longitudinal].filter(Boolean).join(' · '),
+      due: due === 'без срока' ? due : `до ${due}`, owner: ownerInitials,
+      frame: row.frame_number, longitudinal, photoPath: photoPath ?? undefined,
+      photoUrl: photoPath ? await this.supabase.getWorkPhotoUrl(photoPath) : undefined,
+      dueDate: row.due_at ?? undefined,
     };
     this.tasks.update((tasks) => [task, ...tasks]);
     if (task.kind === 'Блокер') {
       this.newBlockers.update((blockers) => [task, ...blockers]);
-      this.blockerCount.update((count) => count + 1);
     }
     this.selectedFile = null;
     this.setPhotoPreview(null);
     this.modalOpen.set(false);
     this.notify(`${task.kind} добавлена`);
+    } catch (error) {
+      this.notify(`Не удалось сохранить запись: ${error instanceof Error ? error.message : 'ошибка'}`);
+    }
   }
 
   selectShip(ship: string): void {
@@ -264,21 +348,22 @@ export class App {
     };
     const [progress, blockers, crew] = stats[ship];
     this.overallProgress.set(progress);
-    this.blockerCount.set(blockers + this.newBlockers().length);
+    void blockers;
     this.crewCount.set(crew);
+    void this.loadCloudData();
     this.notify(`${ship} выбрано`);
   }
 
-  saveNote(): void {
+  async saveNote(): Promise<void> {
     const value = this.quickNote.trim();
     if (!value) { this.notify('Введите текст заметки'); return; }
     try {
-      const notes = JSON.parse(localStorage.getItem('paluba-notes') || '[]') as Array<{ text: string; at: string }>;
-      notes.unshift({ text: value, at: new Date().toISOString() });
-      localStorage.setItem('paluba-notes', JSON.stringify(notes));
-    } catch { /* Local notes are optional in this visual prototype. */ }
-    this.quickNote = '';
-    this.notify('Заметка сохранена на этом устройстве');
+      await this.supabase.insertNote({ vessel: this.selectedShip, deck: this.selectedDeck, zone: this.selectedZone, body: value });
+      this.quickNote = '';
+      this.notify('Заметка сохранена в Supabase');
+    } catch (error) {
+      this.notify(`Не удалось сохранить заметку: ${error instanceof Error ? error.message : 'ошибка'}`);
+    }
   }
 
   showView(view: string): void {

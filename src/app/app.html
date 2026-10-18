@@ -1,3 +1,8 @@
+@if (!authReady()) {
+  <div class="auth-screen"><div class="auth-card"><div class="brand"><div class="brand-icon">⌁</div><span class="brand-name">палуба<em>.</em></span></div><p>Подключаем защищённое рабочее пространство…</p></div></div>
+} @else if (!session()) {
+  <div class="auth-screen"><form class="auth-card" (ngSubmit)="signIn()"><div class="brand"><div class="brand-icon">⌁</div><span class="brand-name">палуба<em>.</em></span></div><h1>Вход супервайзера</h1><p>Закрытое рабочее пространство · профиль V-A-N-D</p><label class="field"><span>Логин или email</span><input type="text" name="authEmail" [(ngModel)]="authEmail" required autocomplete="username" /></label><label class="field"><span>Пароль</span><input type="password" name="authPassword" [(ngModel)]="authPassword" required autocomplete="current-password" /></label>@if (authError()) { <div class="auth-error">{{ authError() }}</div> }<button class="primary auth-submit" type="submit" [disabled]="authBusy()">{{ authBusy() ? 'Входим…' : 'Войти' }}</button></form></div>
+} @else {
 <div class="shell">
   <aside>
     <div class="brand"><div class="brand-icon">⌁</div><span class="brand-name">палуба<em>.</em></span></div>
@@ -18,7 +23,7 @@
   <main>
     <div class="topline">
       <div><div class="eyebrow">{{ activeView() === 'Обзор' ? todayLabel : 'Судно 724 · текущая смена' }}</div><h1 class="title">{{ activeView() === 'Обзор' ? 'Доброе утро, Алексей' : activeView() }}</h1></div>
-      <div class="top-actions"><div class="date-chip">▦ <span>План на сегодня</span></div><button type="button" class="icon-btn" aria-label="Уведомления" (click)="notify('Новых уведомлений нет')">♧</button><button type="button" class="primary" (click)="openModal()">＋ Новая задача</button></div>
+      <div class="top-actions"><div class="date-chip">▦ <span>План на сегодня</span></div><button type="button" class="icon-btn" aria-label="Уведомления" (click)="notify('Новых уведомлений нет')">♧</button><button type="button" class="secondary" (click)="signOut()">Выйти</button><button type="button" class="primary" (click)="openModal()">＋ Новая задача</button></div>
     </div>
 
     @if (activeView() === 'Команда') {
@@ -146,3 +151,4 @@
   </div>
 }
 @if (toastMessage()) { <div class="toast show">{{ toastMessage() }}</div> }
+}
