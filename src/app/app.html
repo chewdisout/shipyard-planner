@@ -1,0 +1,148 @@
+<div class="shell">
+  <aside>
+    <div class="brand"><div class="brand-icon">⌁</div><span class="brand-name">палуба<em>.</em></span></div>
+    <div class="side-label">Рабочее пространство</div>
+    <nav class="nav" aria-label="Основная навигация">
+      @for (view of ['Обзор', 'Задачи', 'Блокеры', 'Команда', 'Зоны']; track view) {
+        <button type="button" [class.active]="activeView() === view" (click)="showView(view)">
+          <span class="ico">{{ view === 'Обзор' ? '◫' : view === 'Задачи' ? '☷' : view === 'Блокеры' ? '⚑' : view === 'Команда' ? '♧' : '▦' }}</span>
+          <span class="nav-label">{{ view === 'Зоны' ? 'Зоны и прогресс' : view }}</span>
+          @if (view === 'Задачи') { <span class="count">{{ taskCount() }}</span> }
+          @if (view === 'Блокеры') { <span class="count">{{ blockerCount() }}</span> }
+        </button>
+      }
+    </nav>
+    <div class="side-bottom"><div class="profile"><div class="avatar">AK</div><div><b>Алексей К.</b><small>Супервайзер HVAC</small></div></div></div>
+  </aside>
+
+  <main>
+    <div class="topline">
+      <div><div class="eyebrow">{{ activeView() === 'Обзор' ? todayLabel : 'Судно 724 · текущая смена' }}</div><h1 class="title">{{ activeView() === 'Обзор' ? 'Доброе утро, Алексей' : activeView() }}</h1></div>
+      <div class="top-actions"><div class="date-chip">▦ <span>План на сегодня</span></div><button type="button" class="icon-btn" aria-label="Уведомления" (click)="notify('Новых уведомлений нет')">♧</button><button type="button" class="primary" (click)="openModal()">＋ Новая задача</button></div>
+    </div>
+
+    @if (activeView() === 'Команда') {
+      <section class="team-page">
+        <div class="team-heading"><div><h2>Моя команда</h2><p>Кто на борту, где работает и когда освободится</p></div><button type="button" class="primary" (click)="openMemberForm()">＋ Добавить сотрудника</button></div>
+        <div class="team-stats">
+          <article class="card team-stat"><span>Всего сотрудников</span><strong>{{ team().length }}</strong></article>
+          <article class="card team-stat"><span>Назначены на работу</span><strong>{{ assignedCount() }}</strong></article>
+          <article class="card team-stat"><span>Свободны</span><strong>{{ team().length - assignedCount() }}</strong></article>
+        </div>
+        <div class="card team-panel">
+          <div class="team-toolbar"><label class="team-search">⌕ <input [(ngModel)]="memberSearch" name="memberSearch" placeholder="Поиск по имени, задаче или зоне" /></label><div class="team-filters">@for (filter of ['Все', 'Назначены', 'Свободны']; track filter) { <button type="button" [class.selected]="teamFilter === filter" (click)="setTeamFilter(filter)">{{ filter }}</button> }</div></div>
+          <div class="team-table-head"><span>Сотрудник</span><span>Назначение</span><span>Освобождается</span><span>Действия</span></div>
+          <div class="team-list">
+            @for (member of visibleTeam; track member.id) {
+              <article class="team-row"><div class="team-person"><span class="team-avatar">{{ initials(member.name) }}</span><div><b>{{ member.name }}</b><small>{{ member.role }}</small></div></div><div class="team-assignment">@if (isAssigned(member)) { <b>{{ member.task || 'Участок назначен' }}</b><small>{{ memberLocation(member) || 'Локация не указана' }}</small> } @else { <span class="unassigned">Не назначен</span><small>Можно назначить на участок</small> }</div><div class="team-until">{{ member.until || '—' }}</div><div class="team-actions"><button type="button" class="secondary small-button" (click)="openMemberForm(member)">{{ isAssigned(member) ? 'Изменить' : 'Назначить' }}</button><button type="button" class="delete-button" aria-label="Удалить сотрудника" title="Удалить сотрудника" (click)="deleteMember(member.id)">×</button></div></article>
+            } @empty { <div class="empty">По этому запросу никого не найдено.</div> }
+          </div>
+          <div class="team-footer">Показано {{ visibleTeam.length }} из {{ team().length }} сотрудников</div>
+        </div>
+      </section>
+    } @else {
+    <div class="filters"><span class="filter-label">Текущий объект</span>
+      <div class="select-wrap">▤ <select aria-label="Судно" [ngModel]="selectedShip" (ngModelChange)="selectShip($event)" name="ship"><option>Судно 724</option><option>Судно 725</option><option>Судно 731</option></select></div>
+      <div class="select-wrap compact"><select aria-label="Палуба" [(ngModel)]="selectedDeck" name="deck"><option>Палуба 5</option><option>Палуба 4</option><option>Палуба 3</option><option>Палуба 2</option></select></div>
+      <div class="select-wrap compact"><select aria-label="Зона" [(ngModel)]="selectedZone" name="zone"><option>Пожарная зона 5</option><option>Пожарная зона 4</option><option>Кормовая зона</option><option>Носовая зона</option></select></div>
+      <div class="context">Смена <strong>07:00–16:00</strong>　·　Обновлено <strong>07:42</strong></div>
+    </div>
+
+    <section class="stats">
+      <article class="card stat"><div class="stat-head"><span>Общий прогресс</span><span class="stat-icon">◴</span></div><div class="stat-val">{{ overallProgress() }}%</div><div class="stat-foot"><span class="good">↑ 6%</span> за последнюю неделю</div></article>
+      <article class="card stat"><div class="stat-head"><span>Открытые блокеры</span><span class="stat-icon">⚑</span></div><div class="stat-val danger">{{ blockerCount() }}</div><div class="stat-foot">1 требует внимания сегодня</div></article>
+      <article class="card stat"><div class="stat-head"><span>Задачи на сегодня</span><span class="stat-icon">☷</span></div><div class="stat-val">{{ taskCount() }}</div><div class="stat-foot">{{ dueTodayCount() }} с высоким приоритетом или сроком сегодня</div></article>
+      <article class="card stat"><div class="stat-head"><span>Люди на участке</span><span class="stat-icon">♧</span></div><div class="stat-val">{{ team().length }} <span class="stat-denom">/ {{ team().length + 2 }}</span></div><div class="stat-foot">2 ожидаются после обеда</div></article>
+    </section>
+
+    <section class="layout">
+      <div class="column">
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">План на сегодня</div><div class="panel-sub">Встречи и важные события</div></div><button type="button" class="text-btn" (click)="notify('План на неделю — следующий шаг прототипа')">Вся неделя →</button></div>
+          <div class="timeline">
+            <div class="event"><div class="time">08:00</div><span class="dot orange"></span><div class="event-info"><b>Координация по блокеру · трасса воздуховода</b><small>Палуба 5 · Пожарная зона 5 · с электриками</small></div><span class="tag amber">Встреча</span></div>
+            <div class="event"><div class="time">09:30</div><span class="dot"></span><div class="event-info"><b>Проверить монтаж магистрали</b><small>Судно 724 · Палуба 5 · зона F5</small></div><span class="tag blue">Проверка</span></div>
+            <div class="event"><div class="time">11:00</div><span class="dot green"></span><div class="event-info"><b>Обход участка с прорабом</b><small>Палуба 4 · пройти секции 41–46</small></div><span class="tag">Обход</span></div>
+            <div class="event"><div class="time">14:00</div><span class="dot"></span><div class="event-info"><b>Сдать изоляцию · участок F5</b><small>После завершения монтажа · 3 специалиста</small></div><span class="tag blue">Дедлайн</span></div>
+          </div>
+        </article>
+
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">Прогресс по зонам</div><div class="panel-sub">Выполнение объёма работ · монтаж вентиляции</div></div><button type="button" class="text-btn" (click)="showView('Зоны')">Подробнее →</button></div>
+          <div class="zone-row"><div class="zone-name"><b>Пожарная зона 5</b><small>420 / 620 м</small></div><div class="progress"><span style="width:68%"></span></div><div class="percent">68%</div></div>
+          <div class="zone-row"><div class="zone-name"><b>Пожарная зона 4</b><small>310 / 500 м</small></div><div class="progress green"><span style="width:62%"></span></div><div class="percent">62%</div></div>
+          <div class="zone-row"><div class="zone-name"><b>Кормовая зона</b><small>184 / 400 м</small></div><div class="progress orange"><span style="width:46%"></span></div><div class="percent">46%</div></div>
+          <div class="zone-row"><div class="zone-name"><b>Носовая зона</b><small>352 / 440 м</small></div><div class="progress green"><span style="width:80%"></span></div><div class="percent">80%</div></div>
+        </article>
+
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">Приоритетные задачи</div><div class="panel-sub">Открытые поручения по выбранному объекту</div></div><button type="button" class="text-btn" (click)="showView('Задачи')">Все задачи →</button></div>
+          <div class="tasks">
+            @for (task of tasks(); track task.id) {
+              <div class="task"><span class="task-prio" [class.high]="task.priority === 'Высокий'" [class.low]="task.priority === 'Низкий'"></span><div class="task-main"><b>{{ task.title }}</b><small>{{ task.zone }} · {{ task.due }} · {{ task.kind }}</small></div><div class="task-meta"><span class="tag" [class.red]="task.priority === 'Высокий'" [class.amber]="task.priority === 'Средний'">{{ task.priority }}</span><span class="mini-avatar">{{ task.owner }}</span></div>@if (task.photoUrl) { <img class="task-photo" [src]="task.photoUrl" alt="Фото к записи" (click)="photoLightbox.set(task.photoUrl!)" /> }</div>
+            }
+          </div>
+        </article>
+      </div>
+
+      <div class="column">
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">Активные блокеры</div><div class="panel-sub">Что мешает продолжать работу</div></div><button type="button" class="text-btn" (click)="showView('Блокеры')">Все {{ blockerCount() }} →</button></div>
+          <div class="blocker"><div class="blocker-icon">!</div><div><b>Пересечение с кабельным лотком</b><small>Зона F5 · ждём решения электриков · 2 дня</small></div><span class="tag red">Критично</span></div>
+          <div class="blocker"><div class="blocker-icon">!</div><div><b>Нет доступа к секции 52</b><small>Палуба 4 · строительные леса · 1 день</small></div><span class="tag amber">Средний</span></div>
+          <div class="blocker"><div class="blocker-icon">!</div><div><b>Не хватает фланцев 250 мм</b><small>Кормовая зона · запрос снабжению · 4 дня</small></div><span class="tag">Ожидание</span></div>
+          @for (blocker of newBlockers(); track blocker.id) {
+            <div class="blocker"><div class="blocker-icon">!</div><div><b>{{ blocker.title }}</b><small>{{ blocker.zone }} · {{ blocker.due }}</small></div>@if (blocker.photoUrl) { <img class="blocker-photo" [src]="blocker.photoUrl" alt="Фото блокера" (click)="photoLightbox.set(blocker.photoUrl)" /> }</div>
+          }
+        </article>
+
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">Команда на участке</div><div class="panel-sub">Назначения и ожидаемое освобождение</div></div><button type="button" class="text-btn" (click)="showView('Команда')">Вся команда →</button></div>
+          <div class="crew">
+            <div class="person"><div class="avatar avatar-blue">ИП</div><div><b>Иван Петров</b><small>Монтаж воздуховода · F5</small></div><div class="person-status"><b>До 12:00</b><br>Работает</div></div>
+            <div class="person"><div class="avatar avatar-green">МС</div><div><b>Марк Соколов</b><small>Подвесы · Палуба 5</small></div><div class="person-status"><b>До 15:00</b><br>Работает</div></div>
+            <div class="person"><div class="avatar avatar-orange">ЛВ</div><div><b>Леонид Волков</b><small>Замеры · кормовая зона</small></div><div class="person-status"><b>До 11:30</b><br>Работает</div></div>
+            <div class="person"><div class="avatar avatar-purple">+9</div><div><b>Остальные сотрудники</b><small>Активны на 3 участках</small></div><div class="person-status"><b>2 позже</b><br>В пути</div></div>
+          </div><div class="crew-foot"><span>В команде</span><strong>{{ team().length }} человек</strong></div>
+        </article>
+
+        <article class="card panel"><div class="panel-head"><div><div class="panel-title">Быстрая заметка</div><div class="panel-sub">Зафиксируйте наблюдение</div></div></div><div class="field"><textarea [(ngModel)]="quickNote" name="quickNote" placeholder="Например: на участке F5 не хватает места для подъёмника…"></textarea></div><div class="save-note"><button type="button" class="primary" (click)="saveNote()">Сохранить заметку</button></div></article>
+      </div>
+    </section>
+    }
+  </main>
+</div>
+
+@if (modalOpen()) {
+  <div class="modal-backdrop show" (click)="$event.target === $event.currentTarget && closeModal()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h2 id="modalTitle">Новая запись</h2><p>Добавьте запись к текущему объекту</p>
+      <form #taskForm="ngForm" (ngSubmit)="addTask()">
+        <div class="form-grid">
+          <div class="field full"><label for="taskName">Что нужно сделать</label><input id="taskName" name="title" [(ngModel)]="form.title" required placeholder="Например: проверить монтаж трассы" /></div>
+          <div class="field"><label for="taskKind">Тип записи</label><select id="taskKind" name="kind" [(ngModel)]="form.kind"><option>Задача</option><option>Блокер</option><option>Замечание</option><option>Встреча</option></select></div>
+          <div class="field"><label for="taskPriority">Приоритет</label><select id="taskPriority" name="priority" [(ngModel)]="form.priority"><option>Средний</option><option>Высокий</option><option>Низкий</option></select></div>
+          <div class="field"><label for="taskZone">Палуба и зона</label><input id="taskZone" name="zone" [(ngModel)]="form.zone" /></div>
+          <div class="field"><label for="taskDue">Срок</label><input id="taskDue" name="due" type="date" [(ngModel)]="form.due" /></div>
+          <div class="field full"><label>Привязка к месту</label><div class="location-fields"><div class="field"><label for="frameNumber">Фрейм · поперёк</label><input id="frameNumber" name="frame" [(ngModel)]="form.frame" placeholder="Например, 52" /></div><div class="field"><label for="longitudinalNumber">L-шпангут · вдоль</label><div class="side-number"><select aria-label="Сторона от нуля" name="side" [(ngModel)]="form.side"><option value="">Сторона</option><option value="Центр">0 · центр</option><option value="Лево">Лево</option><option value="Право">Право</option></select><input id="longitudinalNumber" aria-label="Номер L-шпангоута" name="longitudinalNumber" type="number" min="0" [(ngModel)]="form.longitudinalNumber" placeholder="№" /></div></div></div><span class="hint">Укажите фрейм поперёк корпуса и/или L-шпангут вдоль корпуса.</span></div>
+          <div class="field full"><label for="taskPhoto">Фото @if (form.kind === 'Блокер') { <span class="photo-required">· обязательно для блокера</span> }</label><div class="photo-drop">@if (photoPreview) { <img class="photo-preview show" [src]="photoPreview" alt="Предпросмотр выбранного фото" /> }<input id="taskPhoto" type="file" accept="image/*" [required]="form.kind === 'Блокер'" (change)="onPhotoSelected($event)" /></div><span class="hint">{{ form.kind === 'Блокер' ? 'Прикрепите фото — без него блокер нельзя сохранить.' : 'Можно приложить фотографию для наглядности.' }}</span></div>
+          <div class="field full"><label for="taskOwner">Ответственный</label><input id="taskOwner" name="owner" [(ngModel)]="form.owner" placeholder="Имя сотрудника (необязательно)" /></div>
+        </div>
+        <div class="modal-actions"><button type="button" class="secondary" (click)="closeModal()">Отмена</button><button type="submit" class="primary">Добавить запись</button></div>
+      </form>
+    </div>
+  </div>
+}
+
+@if (photoLightbox()) { <div class="photo-lightbox show" (click)="photoLightbox.set(null)"><img [src]="photoLightbox()" alt="Фото блокера" /></div> }
+@if (showMemberForm()) {
+  <div class="modal-backdrop show" (click)="$event.target === $event.currentTarget && showMemberForm.set(false)">
+    <div class="modal team-modal" role="dialog" aria-modal="true" aria-labelledby="memberModalTitle">
+      <h2 id="memberModalTitle">{{ editingMemberId() ? 'Карточка сотрудника' : 'Новый сотрудник' }}</h2><p>Контактный список и назначение на текущем судне</p>
+      <form #memberFormElement="ngForm" (ngSubmit)="saveMember()"><div class="form-grid">
+        <div class="field full"><label for="memberName">Имя и фамилия</label><input id="memberName" name="memberName" [(ngModel)]="memberForm.name" required placeholder="Например: Иван Петров" /></div>
+        <div class="field full"><label for="memberRole">Специальность</label><input id="memberRole" name="memberRole" [(ngModel)]="memberForm.role" placeholder="Монтажник вентиляции" /></div>
+        <div class="field"><label for="memberDeck">Палуба</label><select id="memberDeck" name="memberDeck" [(ngModel)]="memberForm.deck"><option value="">Не назначена</option><option>Палуба 5</option><option>Палуба 4</option><option>Палуба 3</option><option>Палуба 2</option></select></div>
+        <div class="field"><label for="memberZone">Зона / участок</label><input id="memberZone" name="memberZone" [(ngModel)]="memberForm.zone" placeholder="Пожарная зона 5" /></div>
+        <div class="field full"><label for="memberTask">Текущая задача</label><input id="memberTask" name="memberTask" [(ngModel)]="memberForm.task" placeholder="Например: монтаж магистрали" /></div>
+        <div class="field"><label for="memberUntil">Ожидаемое освобождение</label><input id="memberUntil" name="memberUntil" type="time" [(ngModel)]="memberForm.until" /></div>
+      </div><div class="modal-actions"><button type="button" class="secondary" (click)="showMemberForm.set(false)">Отмена</button><button type="submit" class="primary">{{ editingMemberId() ? 'Сохранить' : 'Добавить в команду' }}</button></div></form>
+    </div>
+  </div>
+}
+@if (toastMessage()) { <div class="toast show">{{ toastMessage() }}</div> }
